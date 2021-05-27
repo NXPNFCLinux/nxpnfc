@@ -1,0 +1,34 @@
+#
+# near field communication configuration
+#
+
+config NXP_NFC_I2C
+	tristate "NFC I2C Slave driver for NXP-NFCC"
+	depends on I2C
+	help
+	  This enables the NFC driver for PN71xx based devices.
+	  This is for I2C connected version. NCI protocol logic
+	  resides in the usermode and it has no other NFC dependencies.
+
+	  If unsure, say N.
+
+config NXP_NFC_SPI
+	tristate "NFC SPI Slave driver for NXP-NFCC"
+	depends on SPI
+	help
+	  This enables the NFC driver for PN71xx based devices.
+	  This is for SPI connected version. NCI protocol logic
+	  resides in the usermode and it has no other NFC dependencies.
+
+	  If unsure, say N.
+
+
+config NXP_NFC_RECOVERY
+	bool "NXP based NFC minimal FW update support"
+	depends on NXP_NFC_I2C && I2C
+        default y
+	help
+	  This enables NFC minimal FW update.
+
+	  If unsure, say N.
+

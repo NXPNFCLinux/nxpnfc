@@ -1,0 +1,12 @@
+Example:
+
+i2c0: i2c@ffd71000 {
+    status = "ok";
+    nxpnfc: nxpnfc@28 {
+        compatible = "nxp,nxpnfc";
+        reg = <0x28>;
+        nxp,nxpnfc-irq = <&gpio26 0 0>;
+        nxp,nxpnfc-ven = <&gpio26 2 0>;
+        nxp,nxpnfc-fw-dwnld = <&gpio26 4 0>;
+    };
+};
