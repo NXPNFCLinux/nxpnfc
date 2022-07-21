@@ -87,6 +87,7 @@
 #define DTS_IRQ_GPIO_STR		"nxp,nxpnfc-irq"
 #define DTS_VEN_GPIO_STR		"nxp,nxpnfc-ven"
 #define DTS_FWDN_GPIO_STR		"nxp,nxpnfc-fw-dwnld"
+#define DTS_TIMEOUT_STR			"nxp,nxpnfc-read-timeout"
 
 enum nfcc_ioctl_request {
 	/* NFC disable request with VEN LOW */
@@ -152,6 +153,7 @@ struct platform_gpio {
 /* NFC Struct to get all the required configs from DTS */
 struct platform_configs {
 	struct platform_gpio gpio;
+	int timeout;
 };
 
 /* Device specific structure */
