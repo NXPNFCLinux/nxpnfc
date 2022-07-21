@@ -130,8 +130,8 @@ int i2c_read(struct nfc_dev *nfc_dev, char *buf, size_t count, int timeout)
 						msecs_to_jiffies(timeout));
 
 					if (ret <= 0) {
-						pr_err("%s: timeout error\n",
-						       __func__);
+						// pr_err("%s: timeout error\n",
+						//        __func__);
 						goto err;
 					}
 				} else {
@@ -226,7 +226,7 @@ ssize_t nfc_i2c_dev_read(struct file *filp, char __user *buf, size_t count,
 		return -EAGAIN;
 	}
 	mutex_lock(&nfc_dev->read_mutex);
-	ret = i2c_read(nfc_dev, nfc_dev->read_kbuf, count, 0);
+	ret = i2c_read(nfc_dev, nfc_dev->read_kbuf, count, nfc_dev->configs.timeout);
 	if (ret > 0) {
 		if (copy_to_user(buf, nfc_dev->read_kbuf, ret)) {
 			pr_warn("%s: failed to copy to user space\n", __func__);

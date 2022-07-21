@@ -28,6 +28,7 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 {
 	struct device_node *np = dev->of_node;
 	struct platform_gpio *nfc_gpio = &nfc_configs->gpio;
+	u32 timeout;
 
 	if (!np) {
 		pr_err("%s: nfc of_node NULL\n", __func__);
@@ -37,6 +38,7 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 	nfc_gpio->irq = -EINVAL;
 	nfc_gpio->dwl_req = -EINVAL;
 	nfc_gpio->ven = -EINVAL;
+	nfc_configs->timeout = 0;
 
 	/* irq required for i2c based chips only */
 	if (interface == PLATFORM_IF_I2C || interface == PLATFORM_IF_SPI) {
@@ -58,9 +60,12 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 	if ((!gpio_is_valid(nfc_gpio->dwl_req)))
 		pr_warn("%s: dwl_req gpio invalid %d\n", __func__,
 			nfc_gpio->dwl_req);
+	/* timeout during read operations */
+	if( 0  == of_property_read_u32(np, DTS_TIMEOUT_STR, &timeout) )
+		nfc_configs->timeout = (int)timeout;
 
-	pr_info("%s: %d, %d, %d\n", __func__, nfc_gpio->irq, nfc_gpio->ven,
-		nfc_gpio->dwl_req);
+	pr_info("%s: %d, %d, %d, %d\n", __func__, nfc_gpio->irq, nfc_gpio->ven,
+		nfc_gpio->dwl_req, nfc_configs->timeout);
 	return 0;
 }
 
