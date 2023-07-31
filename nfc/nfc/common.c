@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (C) 2015, The Linux Foundation. All rights reserved.
- * Copyright (C) 2019-2021 NXP
+ * Copyright 2019-2023 NXP
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -28,16 +28,18 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 {
 	struct device_node *np = dev->of_node;
 	struct platform_gpio *nfc_gpio = &nfc_configs->gpio;
+	unsigned int i = 0;
 
 	if (!np) {
 		pr_err("%s: nfc of_node NULL\n", __func__);
 		return -EINVAL;
 	}
 
-	nfc_gpio->irq = -EINVAL;
-	nfc_gpio->dwl_req = -EINVAL;
-	nfc_gpio->ven = -EINVAL;
-
+	/*Initialize all the gpios to -EINVAL*/
+	for (i = 0; i < sizeof(struct platform_gpio) / sizeof(unsigned int);
+	     i++) {
+		*((unsigned int *)nfc_gpio + i) = -EINVAL;
+	}
 	/* irq required for i2c based chips only */
 	if (interface == PLATFORM_IF_I2C || interface == PLATFORM_IF_SPI) {
 		nfc_gpio->irq = of_get_named_gpio(np, DTS_IRQ_GPIO_STR, 0);
@@ -53,14 +55,42 @@ int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 		pr_err("%s: ven gpio invalid %d\n", __func__, nfc_gpio->ven);
 		return -EINVAL;
 	}
-	/* some products like sn220 does not required fw dwl pin */
-	nfc_gpio->dwl_req = of_get_named_gpio(np, DTS_FWDN_GPIO_STR, 0);
-	if ((!gpio_is_valid(nfc_gpio->dwl_req)))
-		pr_warn("%s: dwl_req gpio invalid %d\n", __func__,
-			nfc_gpio->dwl_req);
 
-	pr_info("%s: %d, %d, %d\n", __func__, nfc_gpio->irq, nfc_gpio->ven,
-		nfc_gpio->dwl_req);
+	nfc_gpio->i2c_sw = of_get_named_gpio(np, DTS_I2C_SW_STR, 0);
+	if ((!gpio_is_valid(nfc_gpio->i2c_sw)))
+		pr_warn("%s: i2c_sw gpio invalid %d\n", __func__,
+			nfc_gpio->i2c_sw);
+
+	nfc_gpio->mode_sw_nfcc = of_get_named_gpio(np, DTS_MODE_SW_STR, 0);
+	if ((!gpio_is_valid(nfc_gpio->mode_sw_nfcc)))
+		pr_warn("%s: mode_sw_nfcc gpio invalid %d\n", __func__,
+			nfc_gpio->mode_sw_nfcc);
+
+	nfc_gpio->mode_sw_smcu = of_get_named_gpio(np, DTS_MODE_SW_SP_STR, 0);
+	if ((!gpio_is_valid(nfc_gpio->mode_sw_smcu)))
+		pr_warn("%s: mode_sw_smcu gpio invalid %d\n", __func__,
+			nfc_gpio->mode_sw_smcu);
+
+	nfc_gpio->mode_sw_smcu_done =
+	    of_get_named_gpio(np, DTS_MODE_SW_SP_DONE_STR, 0);
+	if ((!gpio_is_valid(nfc_gpio->mode_sw_smcu_done)))
+		pr_warn("%s: mode_sw_sp gpio invalid %d\n", __func__,
+			nfc_gpio->mode_sw_smcu_done);
+
+	nfc_gpio->led_red = of_get_named_gpio(np, DTS_RED_LED_STR, 0);
+	if ((!gpio_is_valid(nfc_gpio->led_red)))
+		pr_warn("%s: led_red gpio invalid %d\n", __func__,
+			nfc_gpio->led_red);
+
+	nfc_gpio->led_green = of_get_named_gpio(np, DTS_GREEN_LED_STR, 0);
+	if ((!gpio_is_valid(nfc_gpio->led_green)))
+		pr_warn("%s: led_green gpio invalid %d\n", __func__,
+			nfc_gpio->led_green);
+	pr_info("%s: %d, %d, %d, %d, %d, %d, %d, %d\n", __func__, nfc_gpio->irq,
+		nfc_gpio->ven, nfc_gpio->i2c_sw, nfc_gpio->mode_sw_nfcc,
+		nfc_gpio->mode_sw_smcu, nfc_gpio->mode_sw_smcu_done,
+		nfc_gpio->led_red, nfc_gpio->led_green);
+
 	return 0;
 }
 
@@ -68,7 +98,7 @@ void set_valid_gpio(int gpio, int value)
 {
 	if (gpio_is_valid(gpio)) {
 		pr_debug("%s: gpio %d value %d\n", __func__, gpio, value);
-		gpio_set_value(gpio, value);
+		gpio_set_value(gpio, value % 2);
 		/* hardware dependent delay */
 		usleep_range(NFC_GPIO_SET_WAIT_TIME_US,
 			     NFC_GPIO_SET_WAIT_TIME_US + 100);
@@ -123,8 +153,9 @@ int configure_gpio(unsigned int gpio, int flag)
 		}
 
 		if (ret) {
-			pr_err("%s: unable to set direction for nfc gpio [%d]\n",
-			       __func__, gpio);
+			pr_err
+			    ("%s: unable to set direction for nfc gpio [%d]\n",
+			     __func__, gpio);
 			gpio_free(gpio);
 			return ret;
 		}
@@ -148,18 +179,36 @@ int configure_gpio(unsigned int gpio, int flag)
 	return ret;
 }
 
+/* Configuring board leds*/
+int configure_leds(struct platform_gpio *nfc_gpio)
+{
+	int ret = 0;
+
+	ret = configure_gpio(nfc_gpio->led_green, GPIO_OUTPUT);
+	if (ret) {
+		pr_err
+			("%s: unable to request mode switch sp interface gpio [%d]\n",
+			 __func__, nfc_gpio->led_green);
+	}
+	ret = configure_gpio(nfc_gpio->led_red, GPIO_OUTPUT);
+	if (ret) {
+		pr_err
+			("%s: unable to request mode switch sp interface gpio [%d]\n",
+			 __func__, nfc_gpio->led_red);
+	}
+	return ret;
+}
+
 void gpio_free_all(struct nfc_dev *nfc_dev)
 {
 	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
+	unsigned int i = 0;
 
-	if (gpio_is_valid(nfc_gpio->dwl_req))
-		gpio_free(nfc_gpio->dwl_req);
-
-	if (gpio_is_valid(nfc_gpio->irq))
-		gpio_free(nfc_gpio->irq);
-
-	if (gpio_is_valid(nfc_gpio->ven))
-		gpio_free(nfc_gpio->ven);
+	for (i = 0; i < sizeof(struct platform_gpio) / sizeof(unsigned int);
+	     i++) {
+		if (gpio_is_valid(*((unsigned int *)nfc_gpio + i)))
+			gpio_free(*((unsigned int *)nfc_gpio + i));
+	}
 }
 
 void nfc_misc_unregister(struct nfc_dev *nfc_dev, int count)
@@ -213,6 +262,55 @@ int nfc_misc_register(struct nfc_dev *nfc_dev,
 	return 0;
 }
 
+static int led_switch_control_ioctl(struct nfc_dev *nfc_dev, unsigned long arg)
+{
+	int ret = 0;
+	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
+
+	if (arg == RED_LED_ON || arg == RED_LED_OFF) {
+		set_valid_gpio(nfc_gpio->led_red, arg);
+	} else if (arg == GREEN_LED_ON || arg == GREEN_LED_OFF) {
+		set_valid_gpio(nfc_gpio->led_green, arg);
+	} else {
+		pr_err("%s: bad arg %lu\n", __func__, arg);
+		ret = -ENOIOCTLCMD;
+	}
+	return ret;
+
+}
+
+static int mode_switch_smcu_ioctl(struct nfc_dev *nfc_dev, unsigned long arg)
+{
+	int ret = 0;
+	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
+
+	if (arg == NCI_MODE) {
+		set_valid_gpio(nfc_gpio->mode_sw_smcu, 0);
+	} else if (arg == EMVCO_MODE) {
+		set_valid_gpio(nfc_gpio->mode_sw_smcu, 1);
+	} else {
+		pr_err("%s: bad arg %lu\n", __func__, arg);
+		ret = -ENOIOCTLCMD;
+	}
+	return ret;
+}
+
+static int mode_switch_nfcc_ioctl(struct nfc_dev *nfc_dev, unsigned long arg)
+{
+	int ret = 0;
+	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
+
+	if (arg == NCI_MODE) {
+		set_valid_gpio(nfc_gpio->mode_sw_nfcc, 0);
+	} else if (arg == EMVCO_MODE) {
+		set_valid_gpio(nfc_gpio->mode_sw_nfcc, 1);
+	} else {
+		pr_err("%s: bad arg %lu\n", __func__, arg);
+		ret = -ENOIOCTLCMD;
+	}
+	return ret;
+}
+
 /**
  * nfc_ioctl_power_states() - power control
  * @nfc_dev:    nfc device data structure
@@ -226,7 +324,7 @@ int nfc_misc_register(struct nfc_dev *nfc_dev,
 static int nfc_ioctl_power_states(struct nfc_dev *nfc_dev, unsigned long arg)
 {
 	int ret = 0;
-	struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
+	// struct platform_gpio *nfc_gpio = &nfc_dev->configs.gpio;
 
 	if (arg == NFC_POWER_OFF) {
 		/*
@@ -235,22 +333,18 @@ static int nfc_ioctl_power_states(struct nfc_dev *nfc_dev, unsigned long arg)
 		 * layers.
 		 */
 		nfc_dev->nfc_disable_intr(nfc_dev);
-		set_valid_gpio(nfc_gpio->dwl_req, 0);
 		gpio_set_ven(nfc_dev, 0);
 		nfc_dev->nfc_ven_enabled = false;
 	} else if (arg == NFC_POWER_ON) {
 		nfc_dev->nfc_enable_intr(nfc_dev);
-		set_valid_gpio(nfc_gpio->dwl_req, 0);
-
 		gpio_set_ven(nfc_dev, 1);
 		nfc_dev->nfc_ven_enabled = true;
-	} else if (arg == NFC_FW_DWL_VEN_TOGGLE) {
+	}  else if (arg == NFC_FW_DWL_VEN_TOGGLE) {
 		/*
 		 * We are switching to download Mode, toggle the enable pin
 		 * in order to set the NFCC in the new mode
 		 */
 		nfc_dev->nfc_disable_intr(nfc_dev);
-		set_valid_gpio(nfc_gpio->dwl_req, 1);
 		nfc_dev->nfc_state = NFC_STATE_FW_DWL;
 		gpio_set_ven(nfc_dev, 0);
 		gpio_set_ven(nfc_dev, 1);
@@ -260,21 +354,19 @@ static int nfc_ioctl_power_states(struct nfc_dev *nfc_dev, unsigned long arg)
 		 * Setting firmware download gpio to HIGH
 		 * before FW download start
 		 */
-		set_valid_gpio(nfc_gpio->dwl_req, 1);
 		nfc_dev->nfc_state = NFC_STATE_FW_DWL;
 
-	} else if (arg == NFC_VEN_FORCED_HARD_RESET) {
-		nfc_dev->nfc_disable_intr(nfc_dev);
-		gpio_set_ven(nfc_dev, 0);
-		gpio_set_ven(nfc_dev, 1);
-		nfc_dev->nfc_enable_intr(nfc_dev);
 	} else if (arg == NFC_FW_DWL_LOW) {
 		/*
 		 * Setting firmware download gpio to LOW
 		 * FW download finished
 		 */
-		set_valid_gpio(nfc_gpio->dwl_req, 0);
 		nfc_dev->nfc_state = NFC_STATE_NCI;
+	} else if (arg == NFC_VEN_FORCED_HARD_RESET) {
+		nfc_dev->nfc_disable_intr(nfc_dev);
+		gpio_set_ven(nfc_dev, 0);
+		gpio_set_ven(nfc_dev, 1);
+		nfc_dev->nfc_enable_intr(nfc_dev);
 	} else {
 		pr_err("%s: bad arg %lu\n", __func__, arg);
 		ret = -ENOIOCTLCMD;
@@ -301,8 +393,14 @@ long nfc_dev_ioctl(struct file *pfile, unsigned int cmd, unsigned long arg)
 		return -ENODEV;
 
 	pr_debug("%s: cmd = %x arg = %zx\n", __func__, cmd, arg);
-	if( cmd == NFC_SET_PWR ){
+	if (cmd == NFC_SET_PWR) {
 		ret = nfc_ioctl_power_states(nfc_dev, arg);
+	} else if (cmd == NFCC_PROFILE_SWITCH) {
+		ret = mode_switch_nfcc_ioctl(nfc_dev, arg);
+	} else if (cmd == SMCU_PROFILE_SWITCH) {
+		ret = mode_switch_smcu_ioctl(nfc_dev, arg);
+	} else if (cmd == LEDS_CONTROL) {
+		ret = led_switch_control_ioctl(nfc_dev, arg);
 	} else {
 		pr_err("%s: bad cmd %lu\n", __func__, arg);
 		ret = -ENOIOCTLCMD;
@@ -313,7 +411,7 @@ long nfc_dev_ioctl(struct file *pfile, unsigned int cmd, unsigned long arg)
 int nfc_dev_open(struct inode *inode, struct file *filp)
 {
 	struct nfc_dev *nfc_dev =
-		container_of(inode->i_cdev, struct nfc_dev, c_dev);
+	    container_of(inode->i_cdev, struct nfc_dev, c_dev);
 
 	pr_debug("%s: %d, %d\n", __func__, imajor(inode), iminor(inode));
 
@@ -321,11 +419,8 @@ int nfc_dev_open(struct inode *inode, struct file *filp)
 
 	filp->private_data = nfc_dev;
 
-	if (nfc_dev->dev_ref_count == 0) {
-		set_valid_gpio(nfc_dev->configs.gpio.dwl_req, 0);
-
+	if (nfc_dev->dev_ref_count == 0)
 		nfc_dev->nfc_enable_intr(nfc_dev);
-	}
 	nfc_dev->dev_ref_count = nfc_dev->dev_ref_count + 1;
 	mutex_unlock(&nfc_dev->dev_ref_mutex);
 	return 0;
@@ -334,19 +429,40 @@ int nfc_dev_open(struct inode *inode, struct file *filp)
 int nfc_dev_close(struct inode *inode, struct file *filp)
 {
 	struct nfc_dev *nfc_dev =
-		container_of(inode->i_cdev, struct nfc_dev, c_dev);
+	    container_of(inode->i_cdev, struct nfc_dev, c_dev);
 
 	pr_debug("%s: %d, %d\n", __func__, imajor(inode), iminor(inode));
 	mutex_lock(&nfc_dev->dev_ref_mutex);
-	if (nfc_dev->dev_ref_count == 1) {
+	if (nfc_dev->dev_ref_count == 1)
 		nfc_dev->nfc_disable_intr(nfc_dev);
-		set_valid_gpio(nfc_dev->configs.gpio.dwl_req, 0);
-	}
 	if (nfc_dev->dev_ref_count > 0)
 		nfc_dev->dev_ref_count = nfc_dev->dev_ref_count - 1;
 	filp->private_data = NULL;
 
 	mutex_unlock(&nfc_dev->dev_ref_mutex);
+	return 0;
+}
+
+int nfc_dev_flush(struct file *pfile, fl_owner_t id)
+{
+	struct nfc_dev *nfc_dev = pfile->private_data;
+
+	if (!nfc_dev)
+		return -ENODEV;
+	/*
+	 * release blocked user thread waiting for pending read during close
+	 */
+	if (!mutex_trylock(&nfc_dev->read_mutex)) {
+		nfc_dev->release_read = true;
+		nfc_dev->nfc_disable_intr(nfc_dev);
+		wake_up(&nfc_dev->read_wq);
+		pr_debug("%s: waiting for release of blocked read\n", __func__);
+		mutex_lock(&nfc_dev->read_mutex);
+		nfc_dev->release_read = false;
+	} else {
+		pr_debug("%s: read thread already released\n", __func__);
+	}
+	mutex_unlock(&nfc_dev->read_mutex);
 	return 0;
 }
 
@@ -357,10 +473,6 @@ int validate_nfc_state_nci(struct nfc_dev *nfc_dev)
 	if (!gpio_get_value(nfc_gpio->ven)) {
 		pr_err("%s: ven low - nfcc powered off\n", __func__);
 		return -ENODEV;
-	}
-	if (get_valid_gpio(nfc_gpio->dwl_req) == 1) {
-		pr_err("%s: fw download in-progress\n", __func__);
-		return -EBUSY;
 	}
 	if (nfc_dev->nfc_state != NFC_STATE_NCI) {
 		pr_err("%s: fw download state\n", __func__);

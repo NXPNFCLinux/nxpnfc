@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (C) 2015, The Linux Foundation. All rights reserved.
- * Copyright (C) 2019-2021 NXP
+ * Copyright 2019-2023 NXP
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -21,19 +21,12 @@
 #define _COMMON_H_
 
 #include <linux/cdev.h>
-
-#if IS_ENABLED(CONFIG_NXP_NFC_I2C)
 #include "i2c_drv.h"
-#endif //IS_ENABLED(CONFIG_NXP_NFC_I2C)
-
-#if IS_ENABLED(CONFIG_NXP_NFC_SPI)
-#include "spi_drv.h"
-#endif //IS_ENABLED(CONFIG_NXP_NFC_SPI)
 
 /* Max device count for this driver */
 #define DEV_COUNT			1
 /* i2c device class */
-#define CLASS_NAME			"nfc"
+#define CLASS_NAME			"nxp-nfc"
 
 /* NFC character device name, this will be in /dev/ */
 #define NFC_CHAR_DEV_NAME		"nxpnfc"
@@ -57,7 +50,6 @@
 #define MAX_DL_BUFFER_SIZE		(DL_HDR_LEN + DL_CRC_LEN + \
 					MAX_DL_PAYLOAD_LEN)
 
-
 /* Retry count for normal write */
 #define NO_RETRY			(1)
 /* Maximum retry count for standby writes */
@@ -80,13 +72,19 @@
 
 /* Ioctls */
 /* The type should be aligned with MW HAL definitions */
-#define NFC_SET_PWR			_IOW(NFC_MAGIC, 0x01, long)
-#define ESE_SET_PWR			_IOW(NFC_MAGIC, 0x02, long)
-#define ESE_GET_PWR			_IOR(NFC_MAGIC, 0x03, long)
+#define NFC_SET_PWR			_IOW(NFC_MAGIC, 0x01, uint32_t)
+#define NFCC_PROFILE_SWITCH         _IOW(NFC_MAGIC, 0x04, uint32_t)
+#define SMCU_PROFILE_SWITCH      _IOW(NFC_MAGIC, 0x05, uint32_t)
+#define LEDS_CONTROL             _IOW(NFC_MAGIC, 0x06, uint32_t)
 
 #define DTS_IRQ_GPIO_STR		"nxp,nxpnfc-irq"
 #define DTS_VEN_GPIO_STR		"nxp,nxpnfc-ven"
-#define DTS_FWDN_GPIO_STR		"nxp,nxpnfc-fw-dwnld"
+#define DTS_I2C_SW_STR          "nxp,nxpnfc-i2c_sw"
+#define DTS_MODE_SW_STR         "nxp,nxpnfc-mode_sw"
+#define DTS_MODE_SW_SP_STR      "nxp,nxpnfc-mode_sw_sp"
+#define DTS_MODE_SW_SP_DONE_STR "nxp,nxpnfc-mode_sw_sp_done"
+#define DTS_RED_LED_STR         "nxp,nxpnfc-led1"
+#define DTS_GREEN_LED_STR       "nxp,nxpnfc-led2"
 
 enum nfcc_ioctl_request {
 	/* NFC disable request with VEN LOW */
@@ -112,6 +110,11 @@ enum interface_flags {
 	PLATFORM_IF_SPI = 1,
 };
 
+/* NFCC profile type */
+enum nfcc_profile_flags {
+	NCI_MODE = 0,
+	EMVCO_MODE,
+};
 /* nfc state flags */
 enum nfc_state_flags {
 	/* nfc in unknown state */
@@ -122,15 +125,6 @@ enum nfc_state_flags {
 	NFC_STATE_NCI = 0x2,
 	/* nfc booted in Fw teared mode */
 	NFC_STATE_FW_TEARED = 0x4,
-};
-/*
- * Power state for IBI handing, mainly needed to defer the IBI handling
- *  for the IBI received in suspend state to do it later in resume call
- */
-enum pm_state_flags {
-	PM_STATE_NORMAL = 0,
-	PM_STATE_SUSPEND,
-	PM_STATE_IBI_BEFORE_RESUME,
 };
 
 /* Enum for GPIO values */
@@ -146,12 +140,25 @@ enum gpio_values {
 struct platform_gpio {
 	unsigned int irq;
 	unsigned int ven;
-	unsigned int dwl_req;
+	unsigned int i2c_sw;
+	unsigned int mode_sw_nfcc;
+	unsigned int mode_sw_smcu;
+	unsigned int mode_sw_smcu_done;
+	unsigned int led_red;
+	unsigned int led_green;
 };
 
 /* NFC Struct to get all the required configs from DTS */
 struct platform_configs {
 	struct platform_gpio gpio;
+};
+
+/* Enum for status of LED*/
+enum led_flags {
+	RED_LED_OFF,
+	RED_LED_ON,
+	GREEN_LED_OFF,
+	GREEN_LED_ON,
 };
 
 /* Device specific structure */
@@ -173,19 +180,12 @@ struct nfc_dev {
 	uint8_t nfc_state;
 	/* NFC VEN pin state */
 	bool nfc_ven_enabled;
-	union {
-	#if IS_ENABLED(CONFIG_NXP_NFC_I2C)
-		struct i2c_dev i2c_dev;
-	#endif //IS_ENABLED(CONFIG_NXP_NFC_I2C)
-	#if IS_ENABLED(CONFIG_NXP_NFC_SPI)
-		struct spi_dev spi_dev;
-	#endif //IS_ENABLED(CONFIG_NXP_NFC_SPI)
-	};
+	bool release_read;
+	struct i2c_dev i2c_dev;
 	struct platform_configs configs;
-
+	int irq_sw_smcu_done;
 	/* function pointers for the common i2c functionality */
-	int (*nfc_read)(struct nfc_dev *dev, char *buf, size_t count,
-			int timeout);
+	int (*nfc_read)(struct nfc_dev *dev, char *buf, size_t count);
 	int (*nfc_write)(struct nfc_dev *dev, const char *buf,
 			 const size_t count, int max_retry_cnt);
 	int (*nfc_enable_intr)(struct nfc_dev *dev);
@@ -194,6 +194,7 @@ struct nfc_dev {
 
 int nfc_dev_open(struct inode *inode, struct file *filp);
 int nfc_dev_close(struct inode *inode, struct file *filp);
+int nfc_dev_flush(struct file *pfile, fl_owner_t id);
 long nfc_dev_ioctl(struct file *pfile, unsigned int cmd, unsigned long arg);
 int nfc_parse_dt(struct device *dev, struct platform_configs *nfc_configs,
 		 uint8_t interface);
@@ -202,7 +203,9 @@ int nfc_misc_register(struct nfc_dev *nfc_dev,
 		      char *devname, char *classname);
 void nfc_misc_unregister(struct nfc_dev *nfc_dev, int count);
 int configure_gpio(unsigned int gpio, int flag);
+int configure_leds(struct platform_gpio *nfc_gpio);
 void gpio_set_ven(struct nfc_dev *nfc_dev, int value);
 void gpio_free_all(struct nfc_dev *nfc_dev);
 int validate_nfc_state_nci(struct nfc_dev *nfc_dev);
+int get_valid_gpio(int gpio);
 #endif /* _COMMON_H_ */
